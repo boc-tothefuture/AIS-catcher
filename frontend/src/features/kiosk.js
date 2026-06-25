@@ -16,6 +16,8 @@ import {
     getDistanceUnit,
     getShipDimension,
     getDeltaTimeVal,
+    getDimVal,
+    getDimUnit,
 } from '../core/format.js';
 import { ShippingClass, BASESTATION, SARTEPIRB, ATON, SAR } from '../core/constants.js';
 
@@ -23,6 +25,17 @@ import { ShippingClass, BASESTATION, SARTEPIRB, ATON, SAR } from '../core/consta
 //   showShipcard, saveSettings }
 let deps = null;
 let kioskAnimationInterval = null;
+let currentHighlightIndex = 0;
+let highlightsRotationInterval = null;
+let kioskRotating = false;
+let lastSuperlativesData = {
+    fastest: "-",
+    furthest: "-",
+    closest: "-",
+    largest: "-",
+    total_active: "-",
+    countries: "-"
+};
 
 export function init(d) {
     deps = d;
@@ -51,30 +64,210 @@ export function setKioskPanMap(enabled) {
 export function setKioskSelectionMode(mode) {
     settings.kiosk_selection_mode = mode;
     deps.saveSettings();
+    updateKioskSettingsVisibility();
 }
 
 export function setKioskSidebarPosition(position) {
     settings.kiosk_sidebar_position = position;
     deps.saveSettings();
     updateSidebarVisibility();
+    updateKioskSettingsVisibility();
 }
 
-function updateSidebarVisibility() {
+export function setKioskWeightTransition(weight) {
+    settings.kiosk_weight_transition = parseInt(weight);
+    deps.saveSettings();
+}
+
+export function setKioskWeightChanged(weight) {
+    settings.kiosk_weight_changed = parseInt(weight);
+    deps.saveSettings();
+}
+
+export function setKioskWeightStationary(weight) {
+    settings.kiosk_weight_stationary = parseInt(weight);
+    deps.saveSettings();
+}
+
+export function setKioskSidebarHighlights(enabled) {
+    settings.kiosk_sidebar_highlights = enabled;
+    deps.saveSettings();
+    updateHighlightsVisibility();
+    if (enabled && isKiosk() && kioskAnimationInterval) {
+        startHighlightsRotation();
+    } else {
+        stopHighlightsRotation();
+    }
+}
+
+export function updateHighlightsVisibility() {
+    const highlightsCard = document.getElementById("kiosk_sidebar_highlights_card");
+    if (!highlightsCard) return;
+
+    if (settings.kiosk_sidebar_highlights !== false) {
+        highlightsCard.classList.remove("hidden");
+    } else {
+        highlightsCard.classList.add("hidden");
+    }
+}
+
+export function startHighlightsRotation() {
+    if (highlightsRotationInterval) {
+        clearInterval(highlightsRotationInterval);
+    }
+
+    currentHighlightIndex = 0;
+    renderActiveHighlight();
+
+    highlightsRotationInterval = setInterval(function() {
+        rotateHighlights();
+    }, 10000); // cycle every 10 seconds
+}
+
+export function stopHighlightsRotation() {
+    if (highlightsRotationInterval) {
+        clearInterval(highlightsRotationInterval);
+        highlightsRotationInterval = null;
+    }
+}
+
+export function isRotating() {
+    return kioskRotating;
+}
+
+export function resetKioskTimer() {
+    if (!isKiosk()) return;
+
+    if (kioskAnimationInterval) {
+        clearInterval(kioskAnimationInterval);
+    }
+
+    kioskAnimationInterval = setInterval(function () {
+        showRandomKioskShip();
+    }, settings.kiosk_rotation_speed * 1000);
+
+    // Reset progress bar animation on the current card
+    const bar = document.getElementById("kiosk_progress_bar");
+    if (bar) {
+        bar.style.backgroundColor = settings.shipselection_color || "var(--menu-font-color)";
+        bar.style.transition = "none";
+        bar.style.width = "0%";
+        void bar.offsetWidth; // force reflow
+        const duration = (settings.kiosk_rotation_speed || 5) + "s";
+        bar.style.transition = `width ${duration} linear`;
+        bar.style.width = "100%";
+    }
+}
+
+function rotateHighlights() {
+    const container = document.getElementById("kiosk_sidebar_highlights_container");
+    if (!container) return;
+
+    container.classList.add("kiosk_highlight_fade_out");
+
+    setTimeout(() => {
+        currentHighlightIndex = (currentHighlightIndex + 1) % 6;
+        updateKioskSuperlatives();
+        container.classList.remove("kiosk_highlight_fade_out");
+    }, 300);
+}
+
+function renderActiveHighlight() {
+    const labelEl = document.getElementById("kiosk_sidebar_highlight_label");
+    const valEl = document.getElementById("kiosk_sidebar_highlight_value");
+    const iconEl = document.getElementById("kiosk_sidebar_highlight_icon");
+    if (!labelEl || !valEl || !iconEl) return;
+
+    const highlights = [
+        { label: "Fastest", iconClass: "kiosk_icon_speed", val: lastSuperlativesData.fastest },
+        { label: "Furthest", iconClass: "kiosk_icon_cog", val: lastSuperlativesData.furthest },
+        { label: "Closest", iconClass: "kiosk_icon_destination", val: lastSuperlativesData.closest },
+        { label: "Largest", iconClass: "kiosk_icon_dimension", val: lastSuperlativesData.largest },
+        { label: "Total Vessels", iconClass: "kiosk_icon_shiptype", val: lastSuperlativesData.total_active },
+        { label: "Countries Represented", iconClass: "kiosk_icon_country", val: lastSuperlativesData.countries }
+    ];
+
+    const item = highlights[currentHighlightIndex];
+
+    iconEl.className = `kiosk_icon ${item.iconClass}`;
+    labelEl.innerHTML = item.label;
+    valEl.innerHTML = item.val;
+
+    const card = document.getElementById("kiosk_sidebar_highlights_card");
+    if (card) {
+        const isEmpty = !item.val || item.val === "-" || item.val === "0" || item.val === 0;
+        if (isEmpty) {
+            card.classList.add("kiosk_sidebar_row_empty");
+        } else {
+            card.classList.remove("kiosk_sidebar_row_empty");
+        }
+    }
+}
+
+export function updateSidebarVisibility() {
     const sidebar = document.getElementById("kiosk_sidebar");
     if (!sidebar) return;
 
     const position = settings.kiosk_sidebar_position || "off";
     const isKioskMode = isKiosk();
+    const settingsWindow = document.querySelector(".settings_window");
+    const isSettingsOpen = settingsWindow && settingsWindow.classList.contains("active");
 
     // Remove existing position classes
     sidebar.classList.remove("kiosk_sidebar-left", "kiosk_sidebar-right");
 
-    if (isKioskMode && position !== "off") {
+    if (isKioskMode && position !== "off" && !isSettingsOpen) {
         sidebar.classList.add(`kiosk_sidebar-${position}`);
         sidebar.classList.remove("hidden");
+        updateHighlightsVisibility();
     } else {
         sidebar.classList.add("hidden");
     }
+    updateKioskSettingsVisibility();
+    updateKioskScreenOptimization();
+}
+
+export function updateKioskSettingsVisibility() {
+    // 1. Hide Fleet Highlights if Vessel Details layout is set to "off"
+    const highlightsRow = document.getElementById("settings_kiosk_sidebar_highlights_row");
+    if (highlightsRow) {
+        if (settings.kiosk_sidebar_position && settings.kiosk_sidebar_position !== "off") {
+            highlightsRow.style.display = "";
+        } else {
+            highlightsRow.style.display = "none";
+        }
+    }
+
+    // 2. Hide Priority Weights if Selection Mode is "random"
+    const weightsRow = document.getElementById("settings_kiosk_priority_weights");
+    if (weightsRow) {
+        if (settings.kiosk_selection_mode === "priority" || settings.kiosk_selection_mode === "rotation") {
+            weightsRow.style.display = "flex";
+        } else {
+            weightsRow.style.display = "none";
+        }
+    }
+}
+
+export function setKioskScreenOptimization(value) {
+    settings.kiosk_screen_optimization = value;
+    deps.saveSettings();
+    updateSidebarVisibility();
+}
+
+export function updateKioskScreenOptimization() {
+    const sidebar = document.getElementById("kiosk_sidebar");
+    if (!sidebar) return;
+
+    let scale = 1.0;
+    const optimization = settings.kiosk_screen_optimization || "standard";
+    if (optimization === "1080p") {
+        scale = 1.4;
+    } else if (optimization === "4k") {
+        scale = 2.4;
+    }
+
+    sidebar.style.setProperty("--kiosk-scale", scale);
 }
 
 export function toggleKioskMode() {
@@ -125,17 +318,20 @@ const queues = {
 };
 
 let kioskSelectionCursor = 0;
-const kioskSelectionPattern = [
-    "transition",
-    "transition",
-    "transition",
-    "transition",
-    "changed",
-    "stationary",
-    "changed",
-    "stationary",
-    "changed"
-];
+
+function getSelectionPattern() {
+    const transition = settings.kiosk_weight_transition ?? 4;
+    const changed = settings.kiosk_weight_changed ?? 3;
+    const stationary = settings.kiosk_weight_stationary ?? 2;
+    const result = [];
+    const maxLen = Math.max(transition, changed, stationary);
+    for (let i = 0; i < maxLen; i++) {
+        if (i < transition) result.push("transition");
+        if (i < changed) result.push("changed");
+        if (i < stationary) result.push("stationary");
+    }
+    return result.length > 0 ? result : ["transition", "changed"];
+}
 
 
 
@@ -355,10 +551,11 @@ function selectWeightedShipForKiosk() {
     kioskLastShipState = newKioskLastShipState;
 
     let nextShip = null;
+    const pattern = getSelectionPattern();
 
     // Check all queues for next ship.
-    for (let i = 0; i < kioskSelectionPattern.length && nextShip == null; i++) {
-        const queueKey = kioskSelectionPattern[kioskSelectionCursor];
+    for (let i = 0; i < pattern.length && nextShip == null; i++) {
+        const queueKey = pattern[kioskSelectionCursor % pattern.length];
         const currentQueue = queues[queueKey];
         if (currentQueue && currentQueue.size > 0) {
             nextShip = currentQueue.values().next().value;
@@ -366,7 +563,7 @@ function selectWeightedShipForKiosk() {
             console.log("Read from Queue: " + queueKey);
         }
         // Update cursor and wrap back around
-        kioskSelectionCursor = (kioskSelectionCursor + 1) % kioskSelectionPattern.length;
+        kioskSelectionCursor = (kioskSelectionCursor + 1) % pattern.length;
     }
   
     console.log("Transition Queue Depth: " + transitionQueue.size);
@@ -378,15 +575,34 @@ function selectWeightedShipForKiosk() {
 }
 
 function selectRandomShipForKiosk() {
-    if (settings.kiosk_selection_mode === "rotation") {
+    const mode = settings.kiosk_selection_mode;
+    if (mode === "priority" || mode === "rotation") {
         return selectWeightedShipForKiosk();
     } else {
         return selectWeightedRandomShipForKiosk();
     }
 }
 
+function setRowValue(id, val, isAvailable = true) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    el.innerHTML = val || "-";
+
+    const row = el.closest(".kiosk_sidebar_row");
+    if (row) {
+        const isEmpty = !val || val === "-" || val === "Not available" || !isAvailable;
+        if (isEmpty) {
+            row.classList.add("kiosk_sidebar_row_empty");
+        } else {
+            row.classList.remove("kiosk_sidebar_row_empty");
+        }
+    }
+}
+
 function updateKioskSuperlatives() {
     const shipsDB = deps.getShipsDB();
+    const shipsSince = deps.getShipsSince();
     const shipsList = Object.keys(shipsDB)
         .map(mmsi => shipsDB[mmsi].raw)
         .filter(ship => {
@@ -411,9 +627,13 @@ function updateKioskSuperlatives() {
         });
 
     if (shipsList.length === 0) {
-        document.getElementById("kiosk_sidebar_superlative_fastest").innerHTML = "-";
-        document.getElementById("kiosk_sidebar_superlative_furthest").innerHTML = "-";
-        document.getElementById("kiosk_sidebar_superlative_closest").innerHTML = "-";
+        lastSuperlativesData.fastest = "-";
+        lastSuperlativesData.furthest = "-";
+        lastSuperlativesData.closest = "-";
+        lastSuperlativesData.largest = "-";
+        lastSuperlativesData.total_active = "-";
+        lastSuperlativesData.countries = "-";
+        renderActiveHighlight();
         return;
     }
 
@@ -430,8 +650,11 @@ function updateKioskSuperlatives() {
         }
         // Distance-based (Closest / Furthest)
         if (ship.distance != null && ship.distance > 0) {
-            if (!furthest || ship.distance > furthest.distance) {
-                furthest = ship;
+            // Furthest: only include if we can determine a ship name instead of an MMSI
+            if (getShipName(ship)) {
+                if (!furthest || ship.distance > furthest.distance) {
+                    furthest = ship;
+                }
             }
             if (!closest || ship.distance < closest.distance) {
                 closest = ship;
@@ -439,38 +662,138 @@ function updateKioskSuperlatives() {
         }
     });
 
+    // Active ships (signals in last 30 minutes)
+    const referenceTime = shipsSince || Math.floor(Date.now() / 1000);
+    const activeShips = shipsList.filter(ship => (referenceTime - ship.last_signal) < 1800);
+
+    // Largest
+    let largest = null;
+    let maxLength = 0;
+    activeShips.forEach(ship => {
+        if (ship.to_bow != null && ship.to_stern != null) {
+            const length = ship.to_bow + ship.to_stern;
+            if (length > maxLength) {
+                maxLength = length;
+                largest = ship;
+            }
+        }
+    });
+
+    // Countries
+    // Countries represented counts and flags list
+    const countryCounts = {};
+    activeShips.forEach(ship => {
+        if (ship.country && ship.country.trim() !== "") {
+            const code = ship.country.trim().toUpperCase();
+            countryCounts[code] = (countryCounts[code] || 0) + 1;
+        }
+    });
+
+    const sortedCountries = Object.entries(countryCounts)
+        .sort((a, b) => b[1] - a[1]);
+
+    let countriesHTML = "-";
+    if (sortedCountries.length > 0) {
+        const topN = 3;
+        const topCountries = sortedCountries.slice(0, topN);
+        const otherCountries = sortedCountries.slice(topN);
+
+        const items = [];
+        topCountries.forEach(([code, count]) => {
+            const flagHTML = getFlagStyled(code, "padding: 0px; margin: 0px; box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2); font-size: 20px; display: inline-block; vertical-align: middle;");
+            const name = getCountryName(code) || code;
+            items.push(`<div class="kiosk_country_item" title="${name}">${flagHTML} <span class="kiosk_country_count">${count}</span></div>`);
+        });
+
+        if (otherCountries.length > 0) {
+            const otherCount = otherCountries.reduce((sum, [_, count]) => sum + count, 0);
+            const otherFlagHTML = `<span class="fi fi-xx" style="padding: 0px; margin: 0px; box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2); font-size: 20px; display: inline-block; vertical-align: middle;" title="Other countries"></span>`;
+            items.push(`<div class="kiosk_country_item other" title="Other countries">${otherFlagHTML} <span class="kiosk_country_count">${otherCount} other</span></div>`);
+        }
+
+        countriesHTML = `<div class="kiosk_countries_list">${items.join("")}</div>`;
+    }
+
     const formatVessel = (ship, valueStr) => {
         if (!ship) return "-";
         const name = getShipName(ship) || ship.mmsi;
-        return `${name} (${valueStr})`;
+        return `<span class="kiosk_highlight_shipname">${name}</span><span class="kiosk_highlight_metric">${valueStr}</span>`;
     };
 
     const fastestStr = fastest ? getSpeedVal(fastest.speed) + " " + getSpeedUnit() : null;
     const furthestStr = furthest ? getDistanceVal(furthest.distance) + " " + getDistanceUnit() : null;
     const closestStr = closest ? getDistanceVal(closest.distance) + " " + getDistanceUnit() : null;
+    const largestStr = largest ? getDimVal(largest.to_bow + largest.to_stern) + " " + getDimUnit() : null;
 
-    document.getElementById("kiosk_sidebar_superlative_fastest").innerHTML = fastest ? formatVessel(fastest, fastestStr) : "-";
-    document.getElementById("kiosk_sidebar_superlative_furthest").innerHTML = furthest ? formatVessel(furthest, furthestStr) : "-";
-    document.getElementById("kiosk_sidebar_superlative_closest").innerHTML = closest ? formatVessel(closest, closestStr) : "-";
+    lastSuperlativesData.fastest = fastest ? formatVessel(fastest, fastestStr) : "-";
+    lastSuperlativesData.furthest = furthest ? formatVessel(furthest, furthestStr) : "-";
+    lastSuperlativesData.closest = closest ? formatVessel(closest, closestStr) : "-";
+    lastSuperlativesData.largest = largest ? formatVessel(largest, largestStr) : "-";
+    lastSuperlativesData.total_active = activeShips.length > 0 ? `<span class="kiosk_highlight_shipname">${activeShips.length}</span>` : "-";
+    lastSuperlativesData.countries = countriesHTML;
+
+    renderActiveHighlight();
 }
 
-function populateKioskSidebar(mmsi) {
+export function populateKioskSidebar(mmsi, isRefresh = false) {
     const shipsDB = deps.getShipsDB();
     const ship = shipsDB[mmsi].raw;
     const shipsSince = deps.getShipsSince();
 
-    document.getElementById("kiosk_sidebar_header_flag").innerHTML = getFlagStyled(ship.country, "padding: 0px; margin: 0px; margin-right: 5px; box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.5); font-size: 26px;");
-    document.getElementById("kiosk_sidebar_header_title").innerHTML = (getShipName(ship) || ship.mmsi);
+    const titleEl = document.getElementById("kiosk_sidebar_header_title");
+    titleEl.innerHTML = (getShipName(ship) || ship.mmsi);
+    titleEl.style.color = settings.shipselection_color || "var(--menu-font-color)";
 
-    document.getElementById("kiosk_sidebar_shiptype").innerHTML = ship.shiptype != null ? getShipTypeShort(ship.shiptype) : "-";
-    document.getElementById("kiosk_sidebar_status").innerHTML = getStatusVal(ship) || "-";
-    document.getElementById("kiosk_sidebar_country").innerHTML = getCountryName(ship.country) || "-";
-    document.getElementById("kiosk_sidebar_speed").innerHTML = ship.speed ? getSpeedVal(ship.speed) + " " + getSpeedUnit() : "-";
-    document.getElementById("kiosk_sidebar_heading").innerHTML = ship.heading ? Number(ship.heading).toFixed(0) + "&deg;" : "-";
-    document.getElementById("kiosk_sidebar_cog").innerHTML = ship.cog ? Number(ship.cog).toFixed(0) + "&deg;" : "-";
-    document.getElementById("kiosk_sidebar_destination").innerHTML = ship.destination || "-";
-    document.getElementById("kiosk_sidebar_dimension").innerHTML = getShipDimension(ship) || "-";
-    document.getElementById("kiosk_sidebar_last_signal").innerHTML = getDeltaTimeVal(shipsSince - ship.last_signal) || "-";
+    setRowValue("kiosk_sidebar_shiptype", ship.shiptype != null ? getShipTypeShort(ship.shiptype) : "-");
+
+    // Status with colored indicator dot
+    const statusVal = getStatusVal(ship) || "Not available";
+    let dotColor = "var(--error-color)"; // Default Red for Not available/Not defined
+    const lowStatus = statusVal.toLowerCase();
+
+    if (lowStatus.includes("under way")) {
+        dotColor = "#22c55e"; // Green
+    } else if (lowStatus.includes("anchor") || lowStatus.includes("moored")) {
+        dotColor = "#3b82f6"; // Blue
+    } else if (statusVal === "Not available" || statusVal === "Not defined") {
+        dotColor = "var(--error-color)"; // Red
+    } else {
+        dotColor = "#eab308"; // Yellow/Orange for other states
+    }
+
+    const statusHTML = `<span class="kiosk_status_dot" style="background-color: ${dotColor}"></span>${statusVal}`;
+    const isStatusAvailable = statusVal !== "Not available" && statusVal !== "Not defined" && statusVal !== "Not defined/default";
+
+    setRowValue("kiosk_sidebar_status", statusHTML, isStatusAvailable);
+    
+    const countryName = getCountryName(ship.country) || "-";
+    const countryFlag = ship.country ? getFlagStyled(ship.country, "padding: 0px; margin: 0px; margin-right: 6px; box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2); font-size: 16px; display: inline-block; vertical-align: middle;") : "";
+    setRowValue("kiosk_sidebar_country", countryFlag + countryName);
+    setRowValue("kiosk_sidebar_speed", ship.speed ? getSpeedVal(ship.speed) + " " + getSpeedUnit() : "-");
+
+    const headingVal = ship.heading && ship.heading < 360 ? Number(ship.heading).toFixed(0) + "&deg;" : "-";
+    setRowValue("kiosk_sidebar_heading", headingVal, headingVal !== "-");
+
+    const cogVal = ship.cog && ship.cog < 360 ? Number(ship.cog).toFixed(0) + "&deg;" : "-";
+    setRowValue("kiosk_sidebar_cog", cogVal, cogVal !== "-");
+
+    setRowValue("kiosk_sidebar_destination", ship.destination || "-");
+    setRowValue("kiosk_sidebar_dimension", getShipDimension(ship) || "-");
+    setRowValue("kiosk_sidebar_last_signal", getDeltaTimeVal(shipsSince - ship.last_signal) || "-");
+
+    // Reset and animate subtle horizontal progress bar
+    if (!isRefresh) {
+        const bar = document.getElementById("kiosk_progress_bar");
+        if (bar) {
+            bar.style.backgroundColor = settings.shipselection_color || "var(--menu-font-color)";
+            bar.style.transition = "none";
+            bar.style.width = "0%";
+            void bar.offsetWidth; // force reflow
+            const duration = (settings.kiosk_rotation_speed || 5) + "s";
+            bar.style.transition = `width ${duration} linear`;
+            bar.style.width = "100%";
+        }
+    }
 
     updateKioskSuperlatives();
 }
@@ -522,10 +845,12 @@ function showKioskShip(mmsi) {
 }
 
 function showRandomKioskShip() {
+    kioskRotating = true;
     const selectedMMSI = selectRandomShipForKiosk();
     if (selectedMMSI) {
         showKioskShip(selectedMMSI);
     }
+    kioskRotating = false;
 }
 
 function startKioskAnimation() {
@@ -537,6 +862,10 @@ function startKioskAnimation() {
     kioskAnimationInterval = setInterval(function () {
         showRandomKioskShip();
     }, settings.kiosk_rotation_speed * 1000);
+
+    if (settings.kiosk_sidebar_highlights !== false) {
+        startHighlightsRotation();
+    }
 }
 
 function stopKioskAnimation() {
@@ -545,6 +874,8 @@ function stopKioskAnimation() {
         kioskAnimationInterval = null;
         console.log("Kiosk animation stopped");
     }
+    stopHighlightsRotation();
+
     // Clear state to prevent leaks
     kioskLastShipState = {};
     transitionQueue.clear();

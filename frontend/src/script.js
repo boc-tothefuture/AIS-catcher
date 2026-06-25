@@ -140,6 +140,11 @@ const ACTIONS = {
     setKioskPanMap: (e, d, el) => kiosk.setKioskPanMap(el.checked),
     setKioskSelectionMode: (e, d, el) => kiosk.setKioskSelectionMode(el.value),
     setKioskSidebarPosition: (e, d, el) => kiosk.setKioskSidebarPosition(el.value),
+    setKioskScreenOptimization: (e, d, el) => kiosk.setKioskScreenOptimization(el.value),
+    setKioskSidebarHighlights: (e, d, el) => kiosk.setKioskSidebarHighlights(el.checked),
+    setKioskWeightTransition: (e, d, el) => kiosk.setKioskWeightTransition(el.value),
+    setKioskWeightChanged: (e, d, el) => kiosk.setKioskWeightChanged(el.value),
+    setKioskWeightStationary: (e, d, el) => kiosk.setKioskWeightStationary(el.value),
     setGraphVisibility: (e, d, el) => setGraphVisibility(d.graph, el.checked),
     setMapSetting: (e, d, el) => setMapSetting(d.key, el.type === 'checkbox' ? el.checked : el.value),
     setBinaryDisplay: (e, d, el) => setBinaryDisplay(el.value),
@@ -163,6 +168,9 @@ const ACTIONS = {
     updateTrackWeightDisplay: (e, d, el) => updateTrackWeightDisplay(el.value),
     updateTrackTrashThresholdDisplay: (e, d, el) => updateTrackTrashThresholdDisplay(el.value),
     updateKioskSpeedDisplay: (e, d, el) => updateKioskSpeedDisplay(el.value),
+    updateKioskWeightTransitionDisplay: (e, d, el) => updateKioskWeightTransitionDisplay(el.value),
+    updateKioskWeightChangedDisplay: (e, d, el) => updateKioskWeightChangedDisplay(el.value),
+    updateKioskWeightStationaryDisplay: (e, d, el) => updateKioskWeightStationaryDisplay(el.value),
 
     // context menu (depends on global context_mmsi/card_mmsi)
     toggleShipcardPin: () => toggleShipcardPin(),
@@ -489,8 +497,13 @@ function restoreDefaultSettings() {
         shipcard_pinned_y: null,
         kiosk_rotation_speed: 5,
         kiosk_pan_map: true,
-        kiosk_selection_mode: "weighted",
+        kiosk_selection_mode: "random",
+        kiosk_weight_transition: 4,
+        kiosk_weight_changed: 3,
+        kiosk_weight_stationary: 2,
         kiosk_sidebar_position: "off",
+        kiosk_sidebar_highlights: true,
+        kiosk_screen_optimization: "standard",
         shiptable_columns: ["shipname", "mmsi", "imo", "callsign", "shipclass", "lat", "lon", "last_signal", "level", "distance", "bearing", "speed", "repeat", "ppm", "status"],
         realtime_background_streaming: false,
         realtime_filter_mmsis: [],
@@ -624,10 +637,12 @@ async function copyClipboard(t) {
 
 function openSettings() {
     document.querySelector(".settings_window").classList.add("active");
+    kiosk.updateSidebarVisibility();
 }
 
 function closeSettings() {
     document.querySelector(".settings_window").classList.remove("active");
+    kiosk.updateSidebarVisibility();
 }
 
 function closeTableSide() {
@@ -3511,6 +3526,12 @@ function loadSettings() {
             if (localStorageSettings !== null) {
                 const ls = JSON.parse(localStorageSettings);
                 Object.assign(settings, ls);
+                if (settings.kiosk_selection_mode === "weighted") settings.kiosk_selection_mode = "random";
+                if (settings.kiosk_selection_mode === "rotation") settings.kiosk_selection_mode = "priority";
+                if (settings.kiosk_weight_transition != null) settings.kiosk_weight_transition = parseInt(settings.kiosk_weight_transition);
+                if (settings.kiosk_weight_changed != null) settings.kiosk_weight_changed = parseInt(settings.kiosk_weight_changed);
+                if (settings.kiosk_weight_stationary != null) settings.kiosk_weight_stationary = parseInt(settings.kiosk_weight_stationary);
+                if (settings.kiosk_screen_optimization == null) settings.kiosk_screen_optimization = "standard";
             }
         } catch (error) {
             console.log(error);
@@ -3545,7 +3566,7 @@ function convertStringBooleansToActual() {
         'show_circle_outline', 'dark_mode', 'setcoord', 'eri', 'loadURL',
         'show_station', 'labels_declutter', 'labels_prioritize_active', 'label_class_background', 'show_track_on_hover',
         'show_track_on_select', 'shipcard_max', 'kiosk_pan_map',
-        'show_signal_graphs', 'show_ppm_graphs'
+        'show_signal_graphs', 'show_ppm_graphs', 'kiosk_sidebar_highlights'
     ];
 
     booleanSettings.forEach(key => {
@@ -4510,6 +4531,13 @@ function showShipcard(type, m, pixel = undefined) {
         aside.style.display = '';
     }
 
+    if (settings.kiosk && type === 'ship' && m != null) {
+        if (!kiosk.isRotating()) {
+            kiosk.populateKioskSidebar(m);
+            kiosk.resetKioskTimer();
+        }
+    }
+
     trackLayer.changed();
     labelLayer.changed();
     updateFocusMarker();
@@ -4681,6 +4709,10 @@ async function updateMap() {
             populateShipcard();
         else if (card_type == "plane")
             populatePlanecard();
+    }
+
+    if (settings.kiosk && settings.kiosk_sidebar_position !== "off" && card_type === "ship" && card_mmsi) {
+        kiosk.populateKioskSidebar(card_mmsi, true);
     }
 
     updateMarkerCount();
@@ -5129,10 +5161,21 @@ function updateSettingsTab() {
     document.getElementById("settings_kiosk_mode").checked = settings.kiosk;
     document.getElementById("settings_kiosk_rotation_speed").value = settings.kiosk_rotation_speed;
     document.getElementById("settings_kiosk_pan_map").checked = settings.kiosk_pan_map;
-    document.getElementById("settings_kiosk_selection_mode").value = settings.kiosk_selection_mode || "weighted";
+    document.getElementById("settings_kiosk_selection_mode").value = settings.kiosk_selection_mode || "random";
     document.getElementById("settings_kiosk_sidebar_position").value = settings.kiosk_sidebar_position || "off";
+    document.getElementById("settings_kiosk_screen_optimization").value = settings.kiosk_screen_optimization || "standard";
+    document.getElementById("settings_kiosk_sidebar_highlights").checked = settings.kiosk_sidebar_highlights !== false;
+
+    document.getElementById("settings_kiosk_weight_transition").value = settings.kiosk_weight_transition ?? 4;
+    document.getElementById("settings_kiosk_weight_changed").value = settings.kiosk_weight_changed ?? 3;
+    document.getElementById("settings_kiosk_weight_stationary").value = settings.kiosk_weight_stationary ?? 2;
 
     updateKioskSpeedDisplay(settings.kiosk_rotation_speed);
+    updateKioskWeightTransitionDisplay(settings.kiosk_weight_transition ?? 4);
+    updateKioskWeightChangedDisplay(settings.kiosk_weight_changed ?? 3);
+    updateKioskWeightStationaryDisplay(settings.kiosk_weight_stationary ?? 2);
+
+    kiosk.updateKioskSettingsVisibility();
 
     // Update ship class color inputs
     updateTrackColorInputs();
@@ -5242,6 +5285,21 @@ function updateAndroid() {
 
 function updateKioskSpeedDisplay(value) {
     document.getElementById("kiosk_rotation_speed_label").textContent = `Rotation Speed (${value}s)`;
+}
+
+function updateKioskWeightTransitionDisplay(value) {
+    const el = document.getElementById("settings_kiosk_weight_transition_label");
+    if (el) el.textContent = `State Changes (${value})`;
+}
+
+function updateKioskWeightChangedDisplay(value) {
+    const el = document.getElementById("settings_kiosk_weight_changed_label");
+    if (el) el.textContent = `Moving Vessels (${value})`;
+}
+
+function updateKioskWeightStationaryDisplay(value) {
+    const el = document.getElementById("settings_kiosk_weight_stationary_label");
+    if (el) el.textContent = `Stationary Vessels (${value})`;
 }
 
 function updateTrackWeightDisplay(value) {

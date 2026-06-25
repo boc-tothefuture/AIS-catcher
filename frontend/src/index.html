@@ -520,38 +520,75 @@
 				</section>
 				<header>Kiosk</header>
 				<section>
-					<div>
+					<div title="Toggle Kiosk mode to hide browser controls and cycle through vessels automatically.">
 						<span>Kiosk Mode</span><span>
 							<input type="checkbox" id="settings_kiosk_mode" data-on-change="setKiosk">
 						</span>
 					</div>
-					<div>
+					<div title="Number of seconds to display each vessel before cycling to the next.">
 						<span id="kiosk_rotation_speed_label">Rotation Speed (5s)</span><span>
 							<input type="range" id="settings_kiosk_rotation_speed" min="3" max="30" step="1"
 								data-on-change="setKioskRotationSpeed"
 								data-on-input="updateKioskSpeedDisplay">
 						</span>
 					</div>
-					<div>
+					<div title="Automatically center and pan the map to the currently selected vessel.">
 						<span>Pan Map</span><span>
 							<input type="checkbox" id="settings_kiosk_pan_map" data-on-change="setKioskPanMap">
 						</span>
 					</div>
-					<div>
+					<div title="Method used to choose the next vessel: Priority uses update frequency and state changes; Random uses weighted probability.">
 						<span>Selection Mode</span><span>
 							<select id="settings_kiosk_selection_mode" data-on-change="setKioskSelectionMode">
-								<option value="weighted">Weighted Random</option>
-								<option value="rotation">Queue Rotation</option>
+								<option value="random">Random</option>
+								<option value="priority">Priority</option>
 							</select>
 						</span>
 					</div>
-					<div>
-						<span>Sidebar Position</span><span>
+					<div id="settings_kiosk_priority_weights" style="display: none; flex-direction: column; gap: 8px; padding-left: 12px; margin-bottom: 8px; border-left: 2px solid var(--menu-border-color);">
+						<div title="Weight given to new vessels or vessels changing states (e.g. starting/stopping).">
+							<span id="settings_kiosk_weight_transition_label">State Changes (4)</span><span>
+								<input type="range" id="settings_kiosk_weight_transition" min="1" max="10" step="1"
+									data-on-change="setKioskWeightTransition"
+									data-on-input="updateKioskWeightTransitionDisplay">
+							</span>
+						</div>
+						<div title="Weight given to moving vessels.">
+							<span id="settings_kiosk_weight_changed_label">Moving Vessels (3)</span><span>
+								<input type="range" id="settings_kiosk_weight_changed" min="1" max="10" step="1"
+									data-on-change="setKioskWeightChanged"
+									data-on-input="updateKioskWeightChangedDisplay">
+							</span>
+						</div>
+						<div title="Weight given to stationary vessels.">
+							<span id="settings_kiosk_weight_stationary_label">Stationary Vessels (2)</span><span>
+								<input type="range" id="settings_kiosk_weight_stationary" min="0" max="10" step="1"
+									data-on-change="setKioskWeightStationary"
+									data-on-input="updateKioskWeightStationaryDisplay">
+							</span>
+						</div>
+					</div>
+					<div title="Change layout of selected ship information: Floating Card overlay or docked side panels.">
+						<span>Vessel Details</span><span>
 							<select id="settings_kiosk_sidebar_position" data-on-change="setKioskSidebarPosition">
-								<option value="off">Off (Floating Card)</option>
-								<option value="left">Left</option>
-								<option value="right">Right</option>
+								<option value="off">Floating Card</option>
+								<option value="left">Left Panel</option>
+								<option value="right">Right Panel</option>
 							</select>
+						</span>
+					</div>
+					<div title="Optimize the font and panel sizes for TV displays.">
+						<span>Screen Optimization</span><span>
+							<select id="settings_kiosk_screen_optimization" data-on-change="setKioskScreenOptimization">
+								<option value="standard">Standard (1.0x)</option>
+								<option value="1080p">1080p TV (1.4x)</option>
+								<option value="4k">4K TV (2.4x)</option>
+							</select>
+						</span>
+					</div>
+					<div id="settings_kiosk_sidebar_highlights_row" title="Display the statistics card showing fleet-wide aggregate metrics (e.g. fastest/furthest vessel and countries represented breakdown).">
+						<span>Fleet Highlights</span><span>
+							<input type="checkbox" id="settings_kiosk_sidebar_highlights" data-on-change="setKioskSidebarHighlights">
 						</span>
 					</div>
 				</section>
@@ -1149,26 +1186,95 @@
 				</aside>
 
 				<aside id="kiosk_sidebar" class="kiosk_sidebar hidden">
-					<header id="kiosk_sidebar_header" class="kiosk_sidebar_header">
-						<span id="kiosk_sidebar_header_flag"></span>
-						<span id="kiosk_sidebar_header_title"></span>
-					</header>
 					<div id="kiosk_sidebar_content" class="kiosk_sidebar_content">
-						<div class="kiosk_sidebar_row"><span>Ship type</span><span id="kiosk_sidebar_shiptype">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Status</span><span id="kiosk_sidebar_status">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Country</span><span id="kiosk_sidebar_country">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Speed</span><span id="kiosk_sidebar_speed">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Heading</span><span id="kiosk_sidebar_heading">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Course</span><span id="kiosk_sidebar_cog">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Destination</span><span id="kiosk_sidebar_destination">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Dimensions</span><span id="kiosk_sidebar_dimension">-</span></div>
-						<div class="kiosk_sidebar_row"><span>Last signal</span><span id="kiosk_sidebar_last_signal">-</span></div>
-						<div class="kiosk_sidebar_divider"></div>
-						<div class="kiosk_sidebar_superlatives">
-							<div class="kiosk_sidebar_section_title">Superlatives</div>
-							<div class="kiosk_sidebar_row"><span>Fastest</span><span id="kiosk_sidebar_superlative_fastest">-</span></div>
-							<div class="kiosk_sidebar_row"><span>Furthest</span><span id="kiosk_sidebar_superlative_furthest">-</span></div>
-							<div class="kiosk_sidebar_row"><span>Closest</span><span id="kiosk_sidebar_superlative_closest">-</span></div>
+						<!-- Card 1: Selected Vessel Details -->
+						<div class="kiosk_sidebar_card">
+							<header id="kiosk_sidebar_header" class="kiosk_sidebar_header">
+								<span id="kiosk_sidebar_header_title"></span>
+							</header>
+							<div class="kiosk_sidebar_card_body">
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_shiptype"></i>
+										<span>Ship type</span>
+									</div>
+									<span id="kiosk_sidebar_shiptype">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_status"></i>
+										<span>Status</span>
+									</div>
+									<span id="kiosk_sidebar_status">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_country"></i>
+										<span>Country</span>
+									</div>
+									<span id="kiosk_sidebar_country">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_speed"></i>
+										<span>Speed</span>
+									</div>
+									<span id="kiosk_sidebar_speed">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_heading"></i>
+										<span>Heading</span>
+									</div>
+									<span id="kiosk_sidebar_heading">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_cog"></i>
+										<span>Course</span>
+									</div>
+									<span id="kiosk_sidebar_cog">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_destination"></i>
+										<span>Destination</span>
+									</div>
+									<span id="kiosk_sidebar_destination">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_dimension"></i>
+										<span>Dimensions</span>
+									</div>
+									<span id="kiosk_sidebar_dimension">-</span>
+								</div>
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i class="kiosk_icon kiosk_icon_last_signal"></i>
+										<span>Last signal</span>
+									</div>
+									<span id="kiosk_sidebar_last_signal">-</span>
+								</div>
+							</div>
+							<!-- Subtle Progress Bar countdown -->
+							<div class="kiosk_progress_bar_container">
+								<div id="kiosk_progress_bar" class="kiosk_progress_bar"></div>
+							</div>
+						</div>
+
+						<!-- Card 2: Fleet Highlights -->
+						<div id="kiosk_sidebar_highlights_card" class="kiosk_sidebar_card">
+							<div class="kiosk_sidebar_section_title">Fleet Highlights</div>
+							<div id="kiosk_sidebar_highlights_container" class="kiosk_sidebar_highlight_container">
+								<div class="kiosk_sidebar_row">
+									<div class="kiosk_sidebar_label_container">
+										<i id="kiosk_sidebar_highlight_icon" class="kiosk_icon kiosk_icon_speed"></i>
+										<span id="kiosk_sidebar_highlight_label">Fastest</span>
+									</div>
+									<span id="kiosk_sidebar_highlight_value" class="kiosk_massive_highlight">-</span>
+								</div>
+							</div>
 						</div>
 					</div>
 				</aside>
