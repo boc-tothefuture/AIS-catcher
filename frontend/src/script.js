@@ -4471,7 +4471,7 @@ function showShipcard(type, m, pixel = undefined) {
         }
 
 
-        if (isShipcardMax()) {
+        if (isShipcardMax() && !settings.kiosk) {
             toggleShipcardSize();
         }
         if (!visible) shipcardMinIfMaxonMobile();
