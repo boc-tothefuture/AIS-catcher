@@ -4,6 +4,17 @@
 import { settings, isKiosk } from '../core/state.js';
 import { fromLonLat } from 'ol/proj';
 import { containsCoordinate } from 'ol/extent';
+import {
+    getShipName,
+    getFlagStyled,
+    getShipTypeShort,
+    getStatusVal,
+    getCountryName,
+    getSpeedVal,
+    getSpeedUnit,
+    getShipDimension,
+    getDeltaTimeVal,
+} from '../core/format.js';
 
 // { getMap, getShipsDB, getShipsSince, getCardMmsi, getHoverMmsi,
 //   showShipcard, saveSettings }
@@ -39,6 +50,30 @@ export function setKioskSelectionMode(mode) {
     deps.saveSettings();
 }
 
+export function setKioskSidebarPosition(position) {
+    settings.kiosk_sidebar_position = position;
+    deps.saveSettings();
+    updateSidebarVisibility();
+}
+
+function updateSidebarVisibility() {
+    const sidebar = document.getElementById("kiosk_sidebar");
+    if (!sidebar) return;
+
+    const position = settings.kiosk_sidebar_position || "off";
+    const isKioskMode = isKiosk();
+
+    // Remove existing position classes
+    sidebar.classList.remove("kiosk_sidebar-left", "kiosk_sidebar-right");
+
+    if (isKioskMode && position !== "off") {
+        sidebar.classList.add(`kiosk_sidebar-${position}`);
+        sidebar.classList.remove("hidden");
+    } else {
+        sidebar.classList.add("hidden");
+    }
+}
+
 export function toggleKioskMode() {
     settings.kiosk = !settings.kiosk;
     updateKiosk();
@@ -71,6 +106,7 @@ export function updateKiosk() {
     const toShow = document.querySelectorAll(kiosk ? ".kiosk" : ".nokiosk");
     toHide.forEach(clearAndHide);
     toShow.forEach(restoreOriginalDisplay);
+    updateSidebarVisibility();
 }
 
 // Kiosk Mode Weighted Selection state
@@ -346,6 +382,25 @@ function selectRandomShipForKiosk() {
     }
 }
 
+function populateKioskSidebar(mmsi) {
+    const shipsDB = deps.getShipsDB();
+    const ship = shipsDB[mmsi].raw;
+    const shipsSince = deps.getShipsSince();
+
+    document.getElementById("kiosk_sidebar_header_flag").innerHTML = getFlagStyled(ship.country, "padding: 0px; margin: 0px; margin-right: 5px; box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.5); font-size: 26px;");
+    document.getElementById("kiosk_sidebar_header_title").innerHTML = (getShipName(ship) || ship.mmsi);
+
+    document.getElementById("kiosk_sidebar_shiptype").innerHTML = ship.shiptype != null ? getShipTypeShort(ship.shiptype) : "-";
+    document.getElementById("kiosk_sidebar_status").innerHTML = getStatusVal(ship) || "-";
+    document.getElementById("kiosk_sidebar_country").innerHTML = getCountryName(ship.country) || "-";
+    document.getElementById("kiosk_sidebar_speed").innerHTML = ship.speed ? getSpeedVal(ship.speed) + " " + getSpeedUnit() : "-";
+    document.getElementById("kiosk_sidebar_heading").innerHTML = ship.heading ? Number(ship.heading).toFixed(0) + "&deg;" : "-";
+    document.getElementById("kiosk_sidebar_cog").innerHTML = ship.cog ? Number(ship.cog).toFixed(0) + "&deg;" : "-";
+    document.getElementById("kiosk_sidebar_destination").innerHTML = ship.destination || "-";
+    document.getElementById("kiosk_sidebar_dimension").innerHTML = getShipDimension(ship) || "-";
+    document.getElementById("kiosk_sidebar_last_signal").innerHTML = getDeltaTimeVal(shipsSince - ship.last_signal) || "-";
+}
+
 function showKioskShip(mmsi) {
     const shipsDB = deps.getShipsDB();
     if (!mmsi || !(mmsi in shipsDB)) {
@@ -359,10 +414,37 @@ function showKioskShip(mmsi) {
         return;
     }
 
-    const map = deps.getMap();
-    const shipCoords = fromLonLat([ship.lon, ship.lat]);
-    const pixel = map.getPixelFromCoordinate(shipCoords);
-    deps.showShipcard('ship', mmsi, pixel);
+    const position = settings.kiosk_sidebar_position || "off";
+    if (position !== "off") {
+        // Populate and show the compact sidebar
+        populateKioskSidebar(mmsi);
+        
+        // Hide standard card
+        deps.showShipcard(null, null);
+
+        // Make sure sidebar is visible
+        updateSidebarVisibility();
+
+        // Pan map to ship if pan map setting is enabled
+        if (settings.kiosk_pan_map) {
+            const map = deps.getMap();
+            const shipCoords = fromLonLat([ship.lon, ship.lat]);
+            map.getView().animate({
+                center: shipCoords,
+                duration: 1000
+            });
+        }
+    } else {
+        // Hide compact sidebar
+        const sidebar = document.getElementById("kiosk_sidebar");
+        if (sidebar) sidebar.classList.add("hidden");
+
+        // Show the standard floating shipcard
+        const map = deps.getMap();
+        const shipCoords = fromLonLat([ship.lon, ship.lat]);
+        const pixel = map.getPixelFromCoordinate(shipCoords);
+        deps.showShipcard('ship', mmsi, pixel);
+    }
 }
 
 function showRandomKioskShip() {
@@ -394,5 +476,6 @@ function stopKioskAnimation() {
     transitionQueue.clear();
     changedQueue.clear();
     stationaryQueue.clear();
+    updateSidebarVisibility();
 }
 

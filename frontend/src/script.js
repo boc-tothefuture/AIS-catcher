@@ -139,6 +139,7 @@ const ACTIONS = {
     setKioskRotationSpeed: (e, d, el) => kiosk.setKioskRotationSpeed(el.value),
     setKioskPanMap: (e, d, el) => kiosk.setKioskPanMap(el.checked),
     setKioskSelectionMode: (e, d, el) => kiosk.setKioskSelectionMode(el.value),
+    setKioskSidebarPosition: (e, d, el) => kiosk.setKioskSidebarPosition(el.value),
     setGraphVisibility: (e, d, el) => setGraphVisibility(d.graph, el.checked),
     setMapSetting: (e, d, el) => setMapSetting(d.key, el.type === 'checkbox' ? el.checked : el.value),
     setBinaryDisplay: (e, d, el) => setBinaryDisplay(el.value),
@@ -489,6 +490,7 @@ function restoreDefaultSettings() {
         kiosk_rotation_speed: 5,
         kiosk_pan_map: true,
         kiosk_selection_mode: "weighted",
+        kiosk_sidebar_position: "off",
         shiptable_columns: ["shipname", "mmsi", "imo", "callsign", "shipclass", "lat", "lon", "last_signal", "level", "distance", "bearing", "speed", "repeat", "ppm", "status"],
         realtime_background_streaming: false,
         realtime_filter_mmsis: [],
@@ -5125,6 +5127,7 @@ function updateSettingsTab() {
     document.getElementById("settings_kiosk_rotation_speed").value = settings.kiosk_rotation_speed;
     document.getElementById("settings_kiosk_pan_map").checked = settings.kiosk_pan_map;
     document.getElementById("settings_kiosk_selection_mode").value = settings.kiosk_selection_mode || "weighted";
+    document.getElementById("settings_kiosk_sidebar_position").value = settings.kiosk_sidebar_position || "off";
 
     updateKioskSpeedDisplay(settings.kiosk_rotation_speed);
 

@@ -545,6 +545,15 @@
 							</select>
 						</span>
 					</div>
+					<div>
+						<span>Sidebar Position</span><span>
+							<select id="settings_kiosk_sidebar_position" data-on-change="setKioskSidebarPosition">
+								<option value="off">Off (Floating Card)</option>
+								<option value="left">Left</option>
+								<option value="right">Right</option>
+							</select>
+						</span>
+					</div>
 				</section>
 			</div>
 		</div>
@@ -1137,6 +1146,24 @@
 						</table>
 					</div>
 
+				</aside>
+
+				<aside id="kiosk_sidebar" class="kiosk_sidebar hidden">
+					<header id="kiosk_sidebar_header" class="kiosk_sidebar_header">
+						<span id="kiosk_sidebar_header_flag"></span>
+						<span id="kiosk_sidebar_header_title"></span>
+					</header>
+					<div id="kiosk_sidebar_content" class="kiosk_sidebar_content">
+						<div class="kiosk_sidebar_row"><span>Ship type</span><span id="kiosk_sidebar_shiptype">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Status</span><span id="kiosk_sidebar_status">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Country</span><span id="kiosk_sidebar_country">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Speed</span><span id="kiosk_sidebar_speed">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Heading</span><span id="kiosk_sidebar_heading">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Course</span><span id="kiosk_sidebar_cog">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Destination</span><span id="kiosk_sidebar_destination">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Dimensions</span><span id="kiosk_sidebar_dimension">-</span></div>
+						<div class="kiosk_sidebar_row"><span>Last signal</span><span id="kiosk_sidebar_last_signal">-</span></div>
+					</div>
 				</aside>
 
 				<aside id="shipcard" class="mapcard shipcard-width shipcard-ismax"
