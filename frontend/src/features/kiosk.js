@@ -12,9 +12,12 @@ import {
     getCountryName,
     getSpeedVal,
     getSpeedUnit,
+    getDistanceVal,
+    getDistanceUnit,
     getShipDimension,
     getDeltaTimeVal,
 } from '../core/format.js';
+import { ShippingClass, BASESTATION, SARTEPIRB, ATON, SAR } from '../core/constants.js';
 
 // { getMap, getShipsDB, getShipsSince, getCardMmsi, getHoverMmsi,
 //   showShipcard, saveSettings }
@@ -382,6 +385,75 @@ function selectRandomShipForKiosk() {
     }
 }
 
+function updateKioskSuperlatives() {
+    const shipsDB = deps.getShipsDB();
+    const shipsList = Object.keys(shipsDB)
+        .map(mmsi => shipsDB[mmsi].raw)
+        .filter(ship => {
+            if (!ship.lat || !ship.lon || ship.lat === 0 || ship.lon === 0) {
+                return false;
+            }
+            // Exclude beacons, stations, SAR devices, EPIRBs, and aircraft
+            if (ship.shipclass === ShippingClass.ATON ||
+                ship.shipclass === ShippingClass.STATION ||
+                ship.shipclass === ShippingClass.SARTEPIRB ||
+                ship.shipclass === ShippingClass.PLANE ||
+                ship.shipclass === ShippingClass.HELICOPTER) {
+                return false;
+            }
+            if (ship.mmsi_type === BASESTATION ||
+                ship.mmsi_type === SARTEPIRB ||
+                ship.mmsi_type === ATON ||
+                ship.mmsi_type === SAR) {
+                return false;
+            }
+            return true;
+        });
+
+    if (shipsList.length === 0) {
+        document.getElementById("kiosk_sidebar_superlative_fastest").innerHTML = "-";
+        document.getElementById("kiosk_sidebar_superlative_furthest").innerHTML = "-";
+        document.getElementById("kiosk_sidebar_superlative_closest").innerHTML = "-";
+        return;
+    }
+
+    let fastest = null;
+    let furthest = null;
+    let closest = null;
+
+    shipsList.forEach(ship => {
+        // Fastest
+        if (ship.speed != null && ship.speed > 0) {
+            if (!fastest || ship.speed > fastest.speed) {
+                fastest = ship;
+            }
+        }
+        // Distance-based (Closest / Furthest)
+        if (ship.distance != null && ship.distance > 0) {
+            if (!furthest || ship.distance > furthest.distance) {
+                furthest = ship;
+            }
+            if (!closest || ship.distance < closest.distance) {
+                closest = ship;
+            }
+        }
+    });
+
+    const formatVessel = (ship, valueStr) => {
+        if (!ship) return "-";
+        const name = getShipName(ship) || ship.mmsi;
+        return `${name} (${valueStr})`;
+    };
+
+    const fastestStr = fastest ? getSpeedVal(fastest.speed) + " " + getSpeedUnit() : null;
+    const furthestStr = furthest ? getDistanceVal(furthest.distance) + " " + getDistanceUnit() : null;
+    const closestStr = closest ? getDistanceVal(closest.distance) + " " + getDistanceUnit() : null;
+
+    document.getElementById("kiosk_sidebar_superlative_fastest").innerHTML = fastest ? formatVessel(fastest, fastestStr) : "-";
+    document.getElementById("kiosk_sidebar_superlative_furthest").innerHTML = furthest ? formatVessel(furthest, furthestStr) : "-";
+    document.getElementById("kiosk_sidebar_superlative_closest").innerHTML = closest ? formatVessel(closest, closestStr) : "-";
+}
+
 function populateKioskSidebar(mmsi) {
     const shipsDB = deps.getShipsDB();
     const ship = shipsDB[mmsi].raw;
@@ -399,6 +471,8 @@ function populateKioskSidebar(mmsi) {
     document.getElementById("kiosk_sidebar_destination").innerHTML = ship.destination || "-";
     document.getElementById("kiosk_sidebar_dimension").innerHTML = getShipDimension(ship) || "-";
     document.getElementById("kiosk_sidebar_last_signal").innerHTML = getDeltaTimeVal(shipsSince - ship.last_signal) || "-";
+
+    updateKioskSuperlatives();
 }
 
 function showKioskShip(mmsi) {
@@ -419,8 +493,8 @@ function showKioskShip(mmsi) {
         // Populate and show the compact sidebar
         populateKioskSidebar(mmsi);
         
-        // Hide standard card
-        deps.showShipcard(null, null);
+        // Set standard selected ship so focus marker/circle is drawn
+        deps.showShipcard('ship', mmsi);
 
         // Make sure sidebar is visible
         updateSidebarVisibility();

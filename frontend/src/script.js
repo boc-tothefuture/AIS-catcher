@@ -4451,15 +4451,18 @@ function showShipcard(type, m, pixel = undefined) {
         }
     }
 
-    if (m != null && !visible) {
-        if (measurecardVisible()) toggleMeasurecard();
-        aside.classList.toggle("visible");
+    const isSidebarKiosk = settings.kiosk && settings.kiosk_sidebar_position && settings.kiosk_sidebar_position !== "off";
 
+    if (m != null) {
+        if (!visible && !isSidebarKiosk) {
+            if (measurecardVisible()) toggleMeasurecard();
+            aside.classList.add("visible");
+        } else if (visible && isSidebarKiosk) {
+            aside.classList.remove("visible");
+        }
         select_enabled_track = false;
-
-
     } else if (visible && m == null) {
-        aside.classList.toggle("visible");
+        aside.classList.remove("visible");
     }
 
 
