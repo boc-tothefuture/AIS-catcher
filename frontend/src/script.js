@@ -145,6 +145,7 @@ const ACTIONS = {
     setKioskWeightTransition: (e, d, el) => kiosk.setKioskWeightTransition(el.value),
     setKioskWeightChanged: (e, d, el) => kiosk.setKioskWeightChanged(el.value),
     setKioskWeightStationary: (e, d, el) => kiosk.setKioskWeightStationary(el.value),
+    resetKioskWeights: (e, d, el) => kiosk.resetKioskWeights(),
     setGraphVisibility: (e, d, el) => setGraphVisibility(d.graph, el.checked),
     setMapSetting: (e, d, el) => setMapSetting(d.key, el.type === 'checkbox' ? el.checked : el.value),
     setBinaryDisplay: (e, d, el) => setBinaryDisplay(el.value),
@@ -498,12 +499,17 @@ function restoreDefaultSettings() {
         kiosk_rotation_speed: 5,
         kiosk_pan_map: true,
         kiosk_selection_mode: "random",
-        kiosk_weight_transition: 4,
+        kiosk_weight_transition: 3,
         kiosk_weight_changed: 3,
-        kiosk_weight_stationary: 2,
+        kiosk_weight_stationary: 3,
+        kiosk_weight_blocks: [
+            'transition', 'transition', 'transition',
+            'changed', 'changed', 'changed',
+            'stationary', 'stationary', 'stationary'
+        ],
         kiosk_sidebar_position: "off",
         kiosk_sidebar_highlights: true,
-        kiosk_screen_optimization: "standard",
+        kiosk_screen_optimization: "auto",
         shiptable_columns: ["shipname", "mmsi", "imo", "callsign", "shipclass", "lat", "lon", "last_signal", "level", "distance", "bearing", "speed", "repeat", "ppm", "status"],
         realtime_background_streaming: false,
         realtime_filter_mmsis: [],
@@ -979,6 +985,7 @@ const labelLayer = new ol.layer.Vector({
 
 let shapeFeatures = {};
 let markerFeatures = {};
+let trackFeatures = {};
 
 let stationFeature = undefined;
 let hoverCircleFeature = undefined;
@@ -3531,7 +3538,7 @@ function loadSettings() {
                 if (settings.kiosk_weight_transition != null) settings.kiosk_weight_transition = parseInt(settings.kiosk_weight_transition);
                 if (settings.kiosk_weight_changed != null) settings.kiosk_weight_changed = parseInt(settings.kiosk_weight_changed);
                 if (settings.kiosk_weight_stationary != null) settings.kiosk_weight_stationary = parseInt(settings.kiosk_weight_stationary);
-                if (settings.kiosk_screen_optimization == null) settings.kiosk_screen_optimization = "standard";
+                if (settings.kiosk_screen_optimization == null) settings.kiosk_screen_optimization = "auto";
             }
         } catch (error) {
             console.log(error);
@@ -4516,7 +4523,7 @@ function showShipcard(type, m, pixel = undefined) {
         }
 
 
-        if (isShipcardMax() && !settings.kiosk) {
+        if (isShipcardMax()) {
             toggleShipcardSize();
         }
         if (!visible) shipcardMinIfMaxonMobile();
@@ -4872,15 +4879,11 @@ function createGridCellFeatures(gridCells) {
 }
 
 function redrawMap() {
-    shapeFeatures = {};
-    markerFeatures = {};
+    const lastMarkerFeatures = markerFeatures;
+    const lastShapeFeatures = shapeFeatures;
 
-    markerVector.clear();
-    binaryVector.clear();
-    planeVector.clear();
-    shapeVector.clear();
-    labelVector.clear();
-    trackVector.clear();
+    markerFeatures = {};
+    shapeFeatures = {};
 
     labelLayer.declutter_ = settings.labels_declutter;
 
@@ -4888,77 +4891,185 @@ function redrawMap() {
     const showShapeOutlines = zoom > 11.5;
     const includeLabels = (settings.show_labels === "dynamic" && showShapeOutlines) || settings.show_labels === "always";
 
-    for (let [mmsi, entry] of Object.entries(shipsDB)) {
+    // Update or add ship markers
+    for (let entry of Object.values(shipsDB)) {
         let ship = entry.raw;
         if (ship.lat != null && ship.lon != null && ship.lat != 0 && ship.lon != 0 && ship.lat < 90 && ship.lon < 180) {
-            getSprite(ship)
+            getSprite(ship);
 
-            const lon = ship.lon
-            const lat = ship.lat
+            const lon = ship.lon;
+            const lat = ship.lat;
+            const coords = ol.proj.fromLonLat([lon, lat]);
 
-            const point = new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-            let feature = new ol.Feature({
-                geometry: point
-            })
+            let feature = lastMarkerFeatures[ship.mmsi];
+            if (feature) {
+                feature.getGeometry().setCoordinates(coords);
+                feature.ship = ship;
+                feature.changed();
+                markerFeatures[ship.mmsi] = feature;
+            } else {
+                const point = new ol.geom.Point(coords);
+                feature = new ol.Feature({
+                    geometry: point
+                });
+                feature.ship = ship;
+                markerFeatures[ship.mmsi] = feature;
+                markerVector.addFeature(feature);
+            }
 
-            feature.ship = ship;
-
-            markerFeatures[ship.mmsi] = feature
-            markerVector.addFeature(feature)
-
-            if (includeLabels)
-                labelVector.addFeature(feature)
+            if (includeLabels) {
+                if (!feature.inLabelVector) {
+                    labelVector.addFeature(feature);
+                    feature.inLabelVector = true;
+                }
+            } else {
+                if (feature.inLabelVector) {
+                    labelVector.removeFeature(feature);
+                    feature.inLabelVector = false;
+                }
+            }
 
             if (showShapeOutlines && (ship.heading != null || settings.show_circle_outline)) {
-                const shapeFeature = new ol.Feature({
-                    geometry: createShipOutlineGeometry(ship)
-                })
-                shapeFeature.ship = ship
-                shapeFeatures[ship.mmsi] = shapeFeature
-
-                shapeVector.addFeature(shapeFeature)
+                let shapeFeature = lastShapeFeatures[ship.mmsi];
+                const newGeom = createShipOutlineGeometry(ship);
+                if (shapeFeature) {
+                    shapeFeature.setGeometry(newGeom);
+                    shapeFeature.ship = ship;
+                    shapeFeature.changed();
+                    shapeFeatures[ship.mmsi] = shapeFeature;
+                } else {
+                    shapeFeature = new ol.Feature({
+                        geometry: newGeom
+                    });
+                    shapeFeature.ship = ship;
+                    shapeFeatures[ship.mmsi] = shapeFeature;
+                    shapeVector.addFeature(shapeFeature);
+                }
+            } else {
+                const shapeFeature = lastShapeFeatures[ship.mmsi];
+                if (shapeFeature) {
+                    shapeVector.removeFeature(shapeFeature);
+                }
             }
         }
     }
-    measure.refreshMeasures();
 
+    measure.refreshMeasures();
     redrawBinaryMessages();
 
+    // Update or add planes
     if (planeLayer.isVisible()) {
-
-        for (let [hexident, entry] of Object.entries(planesDB)) {
+        for (let entry of Object.values(planesDB)) {
             let plane = entry.raw;
             if (plane.lat != null && plane.lon != null && plane.lat != 0 && plane.lon != 0 && plane.lat < 90 && plane.lon < 180) {
-                getPlaneSprite(plane)
+                getPlaneSprite(plane);
 
-                const lon = plane.lon
-                const lat = plane.lat
+                const lon = plane.lon;
+                const lat = plane.lat;
+                const coords = ol.proj.fromLonLat([lon, lat]);
 
-                const point = new ol.geom.Point(ol.proj.fromLonLat([lon, lat]))
-                const feature = new ol.Feature({
-                    geometry: point
-                })
+                let feature = lastMarkerFeatures[plane.hexident];
+                if (feature) {
+                    feature.getGeometry().setCoordinates(coords);
+                    feature.plane = plane;
+                    feature.changed();
+                    markerFeatures[plane.hexident] = feature;
+                } else {
+                    const point = new ol.geom.Point(coords);
+                    feature = new ol.Feature({
+                        geometry: point
+                    });
+                    feature.plane = plane;
+                    markerFeatures[plane.hexident] = feature;
+                    planeVector.addFeature(feature);
+                }
 
-                feature.plane = plane;
-
-                markerFeatures[plane.hexident] = feature
-                planeVector.addFeature(feature)
-
-                if (includeLabels)
-                    labelVector.addFeature(feature)
+                if (includeLabels) {
+                    if (!feature.inLabelVector) {
+                        labelVector.addFeature(feature);
+                        feature.inLabelVector = true;
+                    }
+                } else {
+                    if (feature.inLabelVector) {
+                        labelVector.removeFeature(feature);
+                        feature.inLabelVector = false;
+                    }
+                }
+            }
+        }
+    } else {
+        // Remove all planes if layer is hidden
+        for (let key in lastMarkerFeatures) {
+            const feature = lastMarkerFeatures[key];
+            if (feature.plane) {
+                planeVector.removeFeature(feature);
+                if (feature.inLabelVector) {
+                    labelVector.removeFeature(feature);
+                    feature.inLabelVector = false;
+                }
             }
         }
     }
 
-    for (let [mmsi, entry] of Object.entries(paths)) {
+    // Clean up stale ship/plane markers and labels
+    for (let key in lastMarkerFeatures) {
+        if (!markerFeatures[key]) {
+            const feature = lastMarkerFeatures[key];
+            if (feature.ship) {
+                markerVector.removeFeature(feature);
+            } else if (feature.plane) {
+                planeVector.removeFeature(feature);
+            }
+            if (feature.inLabelVector) {
+                labelVector.removeFeature(feature);
+                feature.inLabelVector = false;
+            }
+        }
+    }
 
+    // Clean up stale shape outlines
+    for (let key in lastShapeFeatures) {
+        if (!shapeFeatures[key]) {
+            const shapeFeature = lastShapeFeatures[key];
+            shapeVector.removeFeature(shapeFeature);
+        }
+    }
+
+    // If labels are completely disabled, clear vector and reset flags
+    if (!includeLabels) {
+        labelVector.clear();
+        for (let key in lastMarkerFeatures) {
+            lastMarkerFeatures[key].inLabelVector = false;
+        }
+        for (let key in markerFeatures) {
+            markerFeatures[key].inLabelVector = false;
+        }
+    }
+
+    // Process tracks
+    const activeTrackMmsis = new Set();
+    for (let [mmsi, path] of Object.entries(paths)) {
         if (marker_tracks.has(Number(mmsi)) || show_all_tracks) {
-            const path = paths[mmsi];
+            activeTrackMmsis.add(mmsi);
             const ship = shipsDB[mmsi]?.raw;
             const shipclass = ship?.shipclass;
 
-            // Path: [lat, lon, start_time, end_time]
             if (path.length > 0 && path[0].length >= 4) {
+                const cached = trackFeatures[mmsi];
+                if (cached &&
+                    cached.lastRenderedLength === path.length &&
+                    cached.lastRenderedTimestamp === path[0][2] &&
+                    cached.track_trash_threshold === settings.track_trash_threshold) {
+                    continue;
+                }
+
+                if (cached) {
+                    for (const f of cached.features) {
+                        trackVector.removeFeature(f);
+                    }
+                }
+
+                const currentFeatures = [];
                 let currentSegment = [];
                 let currentDashed = false;
 
@@ -4968,19 +5079,16 @@ function redrawMap() {
 
                     let isDashed = false;
                     if (i > 0) {
-                        const timeBetweenPoints = path[i - 1][2] - point[3]; // newer start_time - older end_time
+                        const timeBetweenPoints = path[i - 1][2] - point[3];
                         isDashed = timeBetweenPoints > settings.track_trash_threshold;
                     }
 
                     if (currentSegment.length === 0) {
-                        // First point
                         currentSegment.push(coord);
-                        currentDashed = false; // First segment is always solid
+                        currentDashed = false;
                     } else if (currentDashed === isDashed) {
-                        // Continue current segment
                         currentSegment.push(coord);
                     } else {
-                        // Create feature for current segment
                         if (currentSegment.length > 1) {
                             const lineString = new ol.geom.LineString(currentSegment);
                             const feature = new ol.Feature(lineString);
@@ -4988,14 +5096,13 @@ function redrawMap() {
                             feature.isDashed = currentDashed;
                             feature.shipclass = shipclass;
                             trackVector.addFeature(feature);
+                            currentFeatures.push(feature);
                         }
-                        // Start new segment
                         currentSegment = [currentSegment[currentSegment.length - 1], coord];
                         currentDashed = isDashed;
                     }
                 }
 
-                // Add final segment
                 if (currentSegment.length > 1) {
                     const lineString = new ol.geom.LineString(currentSegment);
                     const feature = new ol.Feature(lineString);
@@ -5003,8 +5110,27 @@ function redrawMap() {
                     feature.isDashed = currentDashed;
                     feature.shipclass = shipclass;
                     trackVector.addFeature(feature);
+                    currentFeatures.push(feature);
                 }
+
+                trackFeatures[mmsi] = {
+                    features: currentFeatures,
+                    lastRenderedLength: path.length,
+                    lastRenderedTimestamp: path[0][2],
+                    track_trash_threshold: settings.track_trash_threshold
+                };
             }
+        }
+    }
+
+    // Clean up stale tracks
+    for (let mmsi in trackFeatures) {
+        if (!activeTrackMmsis.has(mmsi)) {
+            const cached = trackFeatures[mmsi];
+            for (const f of cached.features) {
+                trackVector.removeFeature(f);
+            }
+            delete trackFeatures[mmsi];
         }
     }
 
@@ -5017,7 +5143,6 @@ function redrawMap() {
 
     drawStation(station);
     updateDistanceCircles();
-
 }
 
 function updateDarkMode() {
@@ -5163,17 +5288,11 @@ function updateSettingsTab() {
     document.getElementById("settings_kiosk_pan_map").checked = settings.kiosk_pan_map;
     document.getElementById("settings_kiosk_selection_mode").value = settings.kiosk_selection_mode || "random";
     document.getElementById("settings_kiosk_sidebar_position").value = settings.kiosk_sidebar_position || "off";
-    document.getElementById("settings_kiosk_screen_optimization").value = settings.kiosk_screen_optimization || "standard";
+
     document.getElementById("settings_kiosk_sidebar_highlights").checked = settings.kiosk_sidebar_highlights !== false;
 
-    document.getElementById("settings_kiosk_weight_transition").value = settings.kiosk_weight_transition ?? 4;
-    document.getElementById("settings_kiosk_weight_changed").value = settings.kiosk_weight_changed ?? 3;
-    document.getElementById("settings_kiosk_weight_stationary").value = settings.kiosk_weight_stationary ?? 2;
-
     updateKioskSpeedDisplay(settings.kiosk_rotation_speed);
-    updateKioskWeightTransitionDisplay(settings.kiosk_weight_transition ?? 4);
-    updateKioskWeightChangedDisplay(settings.kiosk_weight_changed ?? 3);
-    updateKioskWeightStationaryDisplay(settings.kiosk_weight_stationary ?? 2);
+    kiosk.initWeightBarUI();
 
     kiosk.updateKioskSettingsVisibility();
 
@@ -5287,20 +5406,7 @@ function updateKioskSpeedDisplay(value) {
     document.getElementById("kiosk_rotation_speed_label").textContent = `Rotation Speed (${value}s)`;
 }
 
-function updateKioskWeightTransitionDisplay(value) {
-    const el = document.getElementById("settings_kiosk_weight_transition_label");
-    if (el) el.textContent = `State Changes (${value})`;
-}
 
-function updateKioskWeightChangedDisplay(value) {
-    const el = document.getElementById("settings_kiosk_weight_changed_label");
-    if (el) el.textContent = `Moving Vessels (${value})`;
-}
-
-function updateKioskWeightStationaryDisplay(value) {
-    const el = document.getElementById("settings_kiosk_weight_stationary_label");
-    if (el) el.textContent = `Stationary Vessels (${value})`;
-}
 
 function updateTrackWeightDisplay(value) {
     document.getElementById("track_weight_label").textContent = `Track Weight (${value})`;

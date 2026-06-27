@@ -39,6 +39,11 @@ let lastSuperlativesData = {
 
 export function init(d) {
     deps = d;
+    window.addEventListener("resize", () => {
+        if (isKiosk()) {
+            updateKioskScreenOptimization();
+        }
+    });
 }
 
 export function setKiosk(enabled) {
@@ -77,16 +82,204 @@ export function setKioskSidebarPosition(position) {
 export function setKioskWeightTransition(weight) {
     settings.kiosk_weight_transition = parseInt(weight);
     deps.saveSettings();
+    syncBlocksFromWeights();
 }
 
 export function setKioskWeightChanged(weight) {
     settings.kiosk_weight_changed = parseInt(weight);
     deps.saveSettings();
+    syncBlocksFromWeights();
 }
 
 export function setKioskWeightStationary(weight) {
     settings.kiosk_weight_stationary = parseInt(weight);
     deps.saveSettings();
+    syncBlocksFromWeights();
+}
+
+function syncBlocksFromWeights() {
+    let t = settings.kiosk_weight_transition ?? 3;
+    let c = settings.kiosk_weight_changed ?? 3;
+    let s = settings.kiosk_weight_stationary ?? 3;
+    if (t + c + s !== 9) {
+        // If they do not sum to 9, normalize/reset to 3-3-3
+        t = 3;
+        c = 3;
+        s = 3;
+        settings.kiosk_weight_transition = 3;
+        settings.kiosk_weight_changed = 3;
+        settings.kiosk_weight_stationary = 3;
+    }
+    const blocks = [];
+    for (let i = 0; i < t; i++) blocks.push('transition');
+    for (let i = 0; i < c; i++) blocks.push('changed');
+    for (let i = 0; i < s; i++) blocks.push('stationary');
+    settings.kiosk_weight_blocks = blocks;
+    
+    const bar = document.getElementById("kiosk_weight_bar");
+    if (bar) {
+        initWeightBarUI();
+    }
+}
+
+export function initWeightBarUI() {
+    const bar = document.getElementById("kiosk_weight_bar");
+    if (!bar) return;
+
+    let blocks = settings.kiosk_weight_blocks;
+    if (!blocks || !Array.isArray(blocks) || blocks.length !== 9) {
+        let t = settings.kiosk_weight_transition ?? 3;
+        let c = settings.kiosk_weight_changed ?? 3;
+        let s = settings.kiosk_weight_stationary ?? 3;
+        
+        if (t + c + s !== 9) {
+            t = 3;
+            c = 3;
+            s = 3;
+            settings.kiosk_weight_transition = 3;
+            settings.kiosk_weight_changed = 3;
+            settings.kiosk_weight_stationary = 3;
+        }
+
+        blocks = [];
+        for (let i = 0; i < t; i++) blocks.push('transition');
+        for (let i = 0; i < c; i++) blocks.push('changed');
+        for (let i = 0; i < s; i++) blocks.push('stationary');
+        
+        settings.kiosk_weight_blocks = blocks;
+        deps.saveSettings();
+    }
+
+    bar.innerHTML = "";
+    blocks.forEach((state, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `kiosk-weight-token token-${state}`;
+        button.dataset.index = index;
+        button.title = "Tap to cycle: Transitions (Amber) -> Moving (Blue) -> Stationary (Gray)";
+        button.setAttribute("aria-label", `Priority slot ${index + 1}: ${state}`);
+        button.addEventListener("click", () => {
+            cycleWeightBlock(index);
+        });
+
+        let letter = "S";
+        if (state === 'transition') letter = "T";
+        else if (state === 'changed') letter = "M";
+
+        const letterSpan = document.createElement("span");
+        letterSpan.className = "token-letter";
+        letterSpan.textContent = letter;
+        button.appendChild(letterSpan);
+
+        const iconContainer = document.createElement("div");
+        iconContainer.className = "token-icon-container";
+
+        if (state === 'transition') {
+            // Two opposing horizontal arrows (left / right swap)
+            iconContainer.innerHTML = `
+                <svg class="token-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 17H4m16 0l-4-4m4 4l-4 4M4 7h16M4 7l4-4M4 7l4 4"></path>
+                </svg>
+            `;
+        } else if (state === 'changed') {
+            // Moving: vector arrowhead pointing top-right (rotated 45 deg)
+            iconContainer.innerHTML = `
+                <svg class="token-icon-svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 3L18 20L12 17L6 20Z" transform="rotate(45 12 12)"></path>
+                </svg>
+            `;
+        } else {
+            // Stationary: solid dot
+            iconContainer.innerHTML = `
+                <svg class="token-icon-svg" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="5"></circle>
+                </svg>
+            `;
+        }
+
+        button.appendChild(iconContainer);
+        bar.appendChild(button);
+    });
+
+    updateWeightBarLegend();
+}
+
+function cycleWeightBlock(index) {
+    const states = ['transition', 'changed', 'stationary'];
+    const current = settings.kiosk_weight_blocks[index];
+    const nextIndex = (states.indexOf(current) + 1) % states.length;
+    const nextState = states[nextIndex];
+
+    settings.kiosk_weight_blocks[index] = nextState;
+
+    // Recalculate weights
+    const counts = { transition: 0, changed: 0, stationary: 0 };
+    settings.kiosk_weight_blocks.forEach(s => counts[s]++);
+
+    settings.kiosk_weight_transition = counts.transition;
+    settings.kiosk_weight_changed = counts.changed;
+    settings.kiosk_weight_stationary = counts.stationary;
+
+    deps.saveSettings();
+
+    // Update UI elements
+    const bar = document.getElementById("kiosk_weight_bar");
+    if (bar) {
+        const button = bar.children[index];
+        if (button) {
+            button.className = `kiosk-weight-token token-${nextState}`;
+            button.setAttribute("aria-label", `Priority slot ${index + 1}: ${nextState}`);
+
+            let letter = "S";
+            if (nextState === 'transition') letter = "T";
+            else if (nextState === 'changed') letter = "M";
+
+            const letterSpan = button.querySelector(".token-letter");
+            if (letterSpan) {
+                letterSpan.textContent = letter;
+            }
+        }
+    }
+
+    updateWeightBarLegend();
+}
+
+export function resetKioskWeights() {
+    settings.kiosk_weight_blocks = [
+        'transition', 'transition', 'transition',
+        'changed', 'changed', 'changed',
+        'stationary', 'stationary', 'stationary'
+    ];
+    settings.kiosk_weight_transition = 3;
+    settings.kiosk_weight_changed = 3;
+    settings.kiosk_weight_stationary = 3;
+    deps.saveSettings();
+
+    initWeightBarUI();
+}
+
+function updateWeightBarLegend() {
+    const legend = document.getElementById("kiosk_weight_legend");
+    if (!legend) return;
+
+    const t = settings.kiosk_weight_transition ?? 3;
+    const c = settings.kiosk_weight_changed ?? 3;
+    const s = settings.kiosk_weight_stationary ?? 3;
+
+    legend.innerHTML = `
+        <div class="kiosk-weight-legend-item">
+            <span class="legend-dot dot-transition"></span>
+            <span>Transitions: ${t} Queues</span>
+        </div>
+        <div class="kiosk-weight-legend-item">
+            <span class="legend-dot dot-changed"></span>
+            <span>Moving Vessels: ${c} Queues</span>
+        </div>
+        <div class="kiosk-weight-legend-item">
+            <span class="legend-dot dot-stationary"></span>
+            <span>Stationary: ${s} Queues</span>
+        </div>
+    `;
 }
 
 export function setKioskSidebarHighlights(enabled) {
@@ -114,14 +307,11 @@ export function updateHighlightsVisibility() {
 export function startHighlightsRotation() {
     if (highlightsRotationInterval) {
         clearInterval(highlightsRotationInterval);
+        highlightsRotationInterval = null;
     }
 
     currentHighlightIndex = 0;
     renderActiveHighlight();
-
-    highlightsRotationInterval = setInterval(function() {
-        rotateHighlights();
-    }, 10000); // cycle every 10 seconds
 }
 
 export function stopHighlightsRotation() {
@@ -187,7 +377,12 @@ function renderActiveHighlight() {
         { label: "Countries Represented", iconClass: "kiosk_icon_country", val: lastSuperlativesData.countries }
     ];
 
-    const item = highlights[currentHighlightIndex];
+    let idx = currentHighlightIndex;
+    if (idx < 0 || idx >= highlights.length) {
+        idx = 0;
+    }
+
+    const item = highlights[idx];
 
     iconEl.className = `kiosk_icon ${item.iconClass}`;
     labelEl.innerHTML = item.label;
@@ -259,14 +454,8 @@ export function updateKioskScreenOptimization() {
     const sidebar = document.getElementById("kiosk_sidebar");
     if (!sidebar) return;
 
-    let scale = 1.0;
-    const optimization = settings.kiosk_screen_optimization || "standard";
-    if (optimization === "1080p") {
-        scale = 1.4;
-    } else if (optimization === "4k") {
-        scale = 2.4;
-    }
-
+    // Automatically scale based on window height (400px baseline)
+    const scale = 1.0 + Math.max(0, window.innerHeight - 400) * 0.001;
     sidebar.style.setProperty("--kiosk-scale", scale);
 }
 
@@ -295,8 +484,13 @@ function restoreOriginalDisplay(element) {
 
 export function updateKiosk() {
     const kiosk = isKiosk();
-    if (kiosk) startKioskAnimation();
-    else stopKioskAnimation();
+    if (kiosk) {
+        if (!kioskAnimationInterval) {
+            startKioskAnimation();
+        }
+    } else {
+        stopKioskAnimation();
+    }
 
     const toHide = document.querySelectorAll(kiosk ? ".nokiosk" : ".kiosk");
     const toShow = document.querySelectorAll(kiosk ? ".kiosk" : ".nokiosk");
@@ -320,9 +514,9 @@ const queues = {
 let kioskSelectionCursor = 0;
 
 function getSelectionPattern() {
-    const transition = settings.kiosk_weight_transition ?? 4;
+    const transition = settings.kiosk_weight_transition ?? 3;
     const changed = settings.kiosk_weight_changed ?? 3;
-    const stationary = settings.kiosk_weight_stationary ?? 2;
+    const stationary = settings.kiosk_weight_stationary ?? 3;
     const result = [];
     const maxLen = Math.max(transition, changed, stationary);
     for (let i = 0; i < maxLen; i++) {
@@ -850,6 +1044,9 @@ function showRandomKioskShip() {
     if (selectedMMSI) {
         showKioskShip(selectedMMSI);
     }
+    if (settings.kiosk_sidebar_highlights !== false) {
+        rotateHighlights();
+    }
     kioskRotating = false;
 }
 
@@ -858,14 +1055,11 @@ function startKioskAnimation() {
         clearInterval(kioskAnimationInterval);
     }
 
+    currentHighlightIndex = -1;
     showRandomKioskShip();
     kioskAnimationInterval = setInterval(function () {
         showRandomKioskShip();
     }, settings.kiosk_rotation_speed * 1000);
-
-    if (settings.kiosk_sidebar_highlights !== false) {
-        startHighlightsRotation();
-    }
 }
 
 function stopKioskAnimation() {
